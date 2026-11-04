@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Echoes of the Sunken Spire</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<style>
+  /* fonts: local-first, with a graceful fallback if offline */
+  :root {
+    --ink: #1b2230;
+    --parch: #efe4c8;
+    --parch-2: #e2d3ae;
+    --gold: #e8c37a;
+    --aqua: #8fe0ff;
+    --violet: #c9a8ff;
+  }
+</style>
+<link rel="stylesheet" href="/src/style.css" />
+</head>
+<body>
+
+<div id="app">
+  <canvas id="scene"></canvas>
+
+  <!-- ============ HUD (built by ui.js) ============ -->
+  <div id="hud" class="hidden"></div>
+
+  <!-- ============ LOADING ============ -->
+  <div id="loading">
+    <div class="load-title">ECHOES OF THE<br /><span>SUNKEN SPIRE</span></div>
+    <div class="load-track"><div class="load-fill" id="load-fill"></div></div>
+    <div class="load-text" id="load-label">Surveying Vaeloria…</div>
+  </div>
+
+  <!-- ============ TITLE ============ -->
+  <div id="title" class="hidden">
+    <div class="title-glow"></div>
+    <div class="title-inner">
+      <div class="kicker">A tale of Vaeloria</div>
+      <h1>Echoes of the<br /><span>Sunken Spire</span></h1>
+      <p class="blurb">
+        The tower is sinking a handspan a day, and the colour is going out of the world with it.
+        Kaelen has a satchel of maps, a rapier he barely uses, and a sprite in his compass who
+        remembers what the sky used to look like.
+      </p>
+      <button id="start-btn">BEGIN THE SURVEY</button>
+      <div class="controls-grid">
+        <div><b>WASD</b> move</div><div><b>MOUSE</b> look</div>
+        <div><b>LMB</b> rapier</div><div><b>RMB</b> guard / mirror</div>
+        <div><b>SPACE</b> jump · hold to glide</div><div><b>SPACE (still)</b> dodge</div>
+        <div><b>F</b> interact · sketch</div><div><b>F</b> pneumatic line</div>
+        <div><b>R</b> temporal shift</div><div><b>J</b> sketchbook</div>
+        <div><b>TAB</b> lock on</div><div><b>ESC</b> pause</div>
+      </div>
+      <p class="pad-hint">Controller: left stick move · A jump · X attack · B interact · Y shift · View sketchbook</p>
+      <p class="credit">3D art by Kay Lousberg — KayKit Adventurers, Skeletons, Forest Nature, Dungeon, Platformer, Fantasy Weapons &amp; Mixed Bag (CC0)</p>
+    </div>
+  </div>
+
+  <!-- ============ PAUSE ============ -->
+  <div id="pause" class="hidden">
+    <h2>PAUSED</h2>
+    <button id="resume-btn">RESUME THE SURVEY</button>
+    <button id="restart-btn" class="ghost">START AGAIN</button>
+    <p class="small">J — sketchbook · ESC — resume</p>
+  </div>
+
+  <!-- ============ DEATH ============ -->
+  <div id="death" class="hidden">
+    <h2 class="dead">THE MAP ENDS HERE</h2>
+    <p>Lyra pulls you back from the grey. The Spire is still sinking.</p>
+    <button id="revive-btn">GET UP</button>
+  </div>
+
+  <!-- ============ VICTORY ============ -->
+  <div id="victory" class="hidden">
+    <h2 class="win">THE SPIRE REMEMBERS</h2>
+    <p id="victory-text">
+      You bound your own vitality to the Aethel-Spire, and the grey tide stopped where it stood.
+      Vaeloria is not saved the way a battle is won — it is saved the way a map is finished:
+      by someone who kept looking.
+    </p>
+    <p class="small">Echoes recovered · landmarks sketched · a Warden at rest</p>
+    <button id="play-again-btn">SURVEY AGAIN</button>
+  </div>
+</div>
+
+<script type="module" src="/src/main.js"></script>
+</body>
+</html>
