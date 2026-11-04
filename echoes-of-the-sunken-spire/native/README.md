@@ -12,6 +12,7 @@ src/render.h/.cpp multithreaded software rasterizer, frustum culling, depth buff
 src/font_data.h   5x7 bitmap font
 src/platform.h/.cpp window + input: X11, Win32/XInput, or headless
 src/game.h/.cpp   shared action-RPG layer: movement, OoT-style combat, lock-on, enemies, dialogue, HUD
+src/classes.h/.cpp the five playable classes: stats, weapons, attack styles, signature abilities
 src/worlds.cpp    the two campaigns built from the KayKit assets
 src/main.cpp      CLI, frame loop, screenshots
 ```
@@ -53,7 +54,9 @@ Useful options:
 --data <dir>               asset root (the KayKit public/assets folder)
 --width/--height            window size (default 1280x720)
 --render-width/-height      internal render resolution (default 640x360, upscaled)
---play                      skip the title screen
+--play                      skip the title + class picker and start playing
+--class <id>                duelist | warden | mage | ranger | berserker
+--select                    open the class picker (for screenshots)
 --headless --frames N       render offscreen and exit (automated checks)
 --shot out.bmp              save the last frame
 --smoke                     scripted self-test; prints player/quest state
@@ -76,13 +79,38 @@ crisper, slower image.
 | Dodge / jump / glide | Space | A |
 | Interact, talk, light, ring | F | B |
 | Lock on | Tab | R3 |
-| Emberbolt | Q | Y |
+| Class ability | Q | Y |
 | Elixir | E | LB / D-pad up |
 | Sprint | Shift | RB |
 | Pause | Esc | Start |
 
-Sword and shield are equipped from the first frame; other weapons are lying in
-the world as real pickups that swap the held model and the damage stats.
+After the title screen you pick one of five **classes** (see below). Your class
+sets your model, weapon, shield, stats and the ability on `Q`. Every class also
+carries three elixirs on `E`.
+
+## Classes
+
+Press Enter on the title screen to open the class picker, then choose with the
+arrow keys, `A`/`D`, or `1`-`5`, and confirm with Enter. You can also skip the
+picker with `--play --class <id>`.
+
+| Class | Model | Weapon | Vitality | Ability (Q) |
+|---|---|---|---|---|
+| **Duelist** | Rogue | rapier + buckler | 120 | **Riposte** — lunging counter-thrust with brief invulnerability |
+| **Warden** | Knight | longsword + round shield | 170 | **Shield Bash** — wide blow that staggers and knocks foes back |
+| **Ember Mage** | Mage | staff | 85 | **Emberbolt** — hurl a bolt of fire at the lock-on target |
+| **Ranger** | Ranger | longbow | 100 | **Piercing Shot** — an arrow that passes through every enemy in its line |
+| **Berserker** | Barbarian | greataxe | 150 | **Whirlwind** — spinning cleave that strikes every foe around you |
+
+Each class trades one axis for another: the Warden is slow but tough and blocks
+cheaply; the Mage is fragile but regenerates stamina fast and lives on its
+Emberbolt; the Ranger is the fastest and fights at range with its bow (LMB fires
+arrows); the Berserker hits hardest with slow two-handed swings. The Duelist is
+the original Kaelen — balanced, fast three-hit combo.
+
+Classes are defined in one table in `src/classes.cpp` (`kClasses`). Adding a new
+class is one more row; a genuinely new attack style or ability is one more case
+in the `AttackStyle` / `AbilityKind` switches in `game.cpp`.
 
 ## What is in each campaign
 

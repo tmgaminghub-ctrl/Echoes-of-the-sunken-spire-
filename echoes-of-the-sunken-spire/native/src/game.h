@@ -6,6 +6,8 @@
 #include "platform.h"
 #include "gltf.h"
 
+struct ClassDef;   // classes.h — playable paths (Duelist, Warden, Mage, ...)
+
 // ------------------------------------------------------------------ world
 struct Collider {
   float x = 0, z = 0, r = 1, h = 2.2f;
@@ -160,6 +162,17 @@ struct Player : Actor {
   float stepTimer = 0;
   float speedSmooth = 0;
   float yawTarget = 0;
+
+  // class / abilities
+  const ClassDef* cls = nullptr;   // active playable class (see classes.h)
+  int classIndex = 0;
+  float abilityCd = 0;             // seconds until Q is ready again
+  float abilityT = 0;              // >0 while a signature ability is animating
+  int elixirs = 3;                 // shared healing draughts (E)
+  float elixirCd = 0;
+  float attackDamage = 16.f;       // resolved from class weapon x damage mult
+  float attackReach = 2.6f;
+  float moveSpeed = 5.6f;
 };
 
 extern WeaponDef kRapier;
@@ -179,6 +192,7 @@ struct EnemyCfg {
 
 struct Enemy : Actor {
   const EnemyCfg* cfg = nullptr;
+  int uid = 0;                     // stable id (piercing shots track who they hit)
   ActorState state = ActorState::Idle;
   float attackT = 0, cooldownT = 0, hurtT = 0;
   bool hitApplied = false;
@@ -200,6 +214,9 @@ struct Projectile {
   float damage = 10.f;
   bool dead = false;
   bool fromPlayer = false;
+  bool pierce = false;             // passes through enemies (Ranger's Piercing Shot)
+  V3 color{1.f, 0.6f, 0.2f};       // tracer tint
+  std::vector<int> hitUids;        // enemies already struck (for pierce)
 };
 
 // ------------------------------------------------------------------ game
@@ -212,12 +229,15 @@ class Game {
   Player player;
   std::vector<Enemy> enemies;
   std::vector<Projectile> projectiles;
+  int nextEnemyUid = 1;
   Camera cam;
   float camYaw = 0.f, camPitch = 0.26f, camDist = 6.4f, camPosInit = 0;
   float camIdle = 0.f;
   V3 camPos;
   bool paused = false;
   bool titleScreen = true;
+  bool classSelect = false;        // class-picker screen (between title and play)
+  int classCursor = 0;             // highlighted class on the picker
   float time = 0;
   float hitstop = 0;
   float shakeAmt = 0;
@@ -274,6 +294,17 @@ class Game {
   void setObjective(const char* main, const char* sub);
   void startTitle();
   void beginPlay();
+
+  // ---- class system (classes.h / classes.cpp) ----
+  void applyClass(int index);          // equip model, weapon, stats for a class
+  void openClassSelect();              // title -> class picker
+  void updateClassSelect();            // picker input (called from main loop)
+  void drawClassSelect();              // picker overlay
+  void confirmClass();                 // picker -> beginPlay with chosen class
+  void useAbility();                   // Q — signature class ability
+  void useElixir();                    // E — shared heal
+  void fireProjectile(const V3& dir, float speed, float damage, bool pierce, const V3& color);
+  void drawClassHud();                 // ability cooldown + elixir pips
   float camForwardX() const { return -std::sin(camYaw); }
   float camForwardZ() const { return -std::cos(camYaw); }
 };
