@@ -86,14 +86,13 @@ class SunkenSpire : public Game {
     assets.loadClipPack("anim/Rig_Medium_Special.glb");
 
     // ---------------- Kaelen ----------------
-    player.model = assets.tryLoad("characters/Rogue.glb");
-    if (player.model) player.anim.bind(player.model);
-    player.maxHp = player.hp = 120;
+    // The player's path is chosen on the class picker (or --class). Default is
+    // the Duelist: the original rapier-and-buckler cartographer.
     player.radius = 0.55f;
-    equipWeapon(kRapier);
-    player.shieldModel = assets.prop("shield_B");
-    player.shieldName = "Apprentice's Buckler";
+    applyClass(player.classIndex);
     player.glideUnlocked = false;
+    player.pos = world.spawn;
+    player.pos.y = world.groundY(player.pos.x, player.pos.z);
 
     // ---------------- ground ----------------
     world.buildTerrain(64, 300.f, V3(0.42f, 0.62f, 0.30f), V3(0.72f, 0.70f, 0.52f), 3);

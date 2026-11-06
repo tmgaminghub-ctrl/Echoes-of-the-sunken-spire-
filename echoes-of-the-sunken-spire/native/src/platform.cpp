@@ -56,6 +56,8 @@ Key mapAscii(int c) {
     case '1': return KEY_1;
     case '2': return KEY_2;
     case '3': return KEY_3;
+    case '4': return KEY_4;
+    case '5': return KEY_5;
     case ' ': return KEY_SPACE;
     default: return KEY_NONE;
   }
@@ -541,7 +543,7 @@ bool keyFromWParam(WPARAM wp, Key& out) {
     default: break;
   }
   if (wp >= 'A' && wp <= 'Z') { out = mapAscii((int)wp); return true; }
-  if (wp >= '1' && wp <= '3') { out = mapAscii((int)wp); return true; }
+  if (wp >= '1' && wp <= '5') { out = mapAscii((int)wp); return true; }
   return false;
 }
 

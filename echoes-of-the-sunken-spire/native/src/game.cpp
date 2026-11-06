@@ -3,6 +3,7 @@
 //             camera, rasterised HUD
 // ---------------------------------------------------------------------------
 #include "game.h"
+#include "classes.h"
 #include "font_data.h"
 #include <cstdio>
 
@@ -285,11 +286,14 @@ void Game::advanceDialogue() {
 
 void Game::beginPlay() {
   titleScreen = false;
+  classSelect = false;
+  applyClass(player.classIndex);
   player.pos = world.spawn;
   player.facing = PI_F;
   player.hp = player.maxHp;
   player.state = ActorState::Idle;
   camYaw = 0.f;
+  camDist = 6.4f;
   camPos = player.pos + V3(std::sin(camYaw) * camDist, 4.f, std::cos(camYaw) * camDist);
   if (player.anim.model) player.anim.play(assets.clipAny({"Idle_A", "Skeletons_Idle"}), 0.1f, true);
 }
@@ -301,11 +305,11 @@ WeaponDef kRapier{"Heirloom Iron Rapier", "wargear/sword_D.gltf", 1.05f, 2.5f, 1
 WeaponDef kLongsword{"Hollowmere Longsword", "weapons/sword_1handed.gltf", 1.0f, 2.4f, 1.0f, V3(2.876f, 0.f, 1.84f), 1.f, 0.75f};
 
 void Game::equipWeapon(const WeaponDef& def) {
-  Model* m = assets.prop(def.modelPath);
-  if (!m) {
-    // fall back to any sword we can find
-    m = assets.prop("sword_1handed");
-  }
+  // modelPath may be a full relative path ("wargear/sword_D.gltf") or a bare
+  // prop name ("sword_1handed"). Try the direct path first, then prop() lookup.
+  Model* m = assets.tryLoad(def.modelPath);
+  if (!m || m->meshes.empty()) m = assets.prop(def.modelPath);
+  if (!m || m->meshes.empty()) m = assets.prop("sword_1handed");
   player.weaponModel = m;
   player.weaponGrip = def.gripEuler;
   player.weaponScale = def.scale;
@@ -467,7 +471,11 @@ void Game::updatePlayer(float dt) {
   p.invuln = std::max(0.f, p.invuln - dt);
   p.attackCooldown = std::max(0.f, p.attackCooldown - dt);
   p.comboWindow = std::max(0.f, p.comboWindow - dt);
-  p.stamina = std::min(p.maxStamina, p.stamina + 14.f * dt);
+  p.abilityCd = std::max(0.f, p.abilityCd - dt);
+  p.elixirCd = std::max(0.f, p.elixirCd - dt);
+  p.abilityT = std::max(0.f, p.abilityT - dt);
+  float regen = p.cls ? p.cls->staminaRegen : 14.f;
+  p.stamina = std::min(p.maxStamina, p.stamina + regen * dt);
 
   bool dlg = dialogue.active;
   V3 move(0, 0, 0);
@@ -494,9 +502,21 @@ void Game::updatePlayer(float dt) {
     if (!p.hitApplied && prog >= 0.42f) {
       p.hitApplied = true;
       V3 fwd(std::sin(p.facing), 0, std::cos(p.facing));
-      meleeArc(p.pos + V3(0, 1.0f, 0), fwd, 2.6f, 0.35f, 16.f * (p.combo >= 2 ? 1.5f : 1.f), p.combo >= 2);
-      // lunge
-      p.vel += fwd * 3.0f;
+      AttackStyle style = p.cls ? p.cls->style : AttackStyle::Melee1H;
+      if (style == AttackStyle::Bow) {
+        // loose an arrow toward the lock-on target, else straight ahead
+        V3 dir = fwd;
+        if (p.lockOn && p.lockTarget && !p.lockTarget->dead) {
+          V3 to = (p.lockTarget->pos + V3(0, 1.0f, 0)) - (p.pos + V3(0, 1.2f, 0));
+          if (length(to) > 0.1f) dir = normalize(to);
+        }
+        fireProjectile(dir, 26.f, p.attackDamage * (p.combo >= 2 ? 1.4f : 1.f), false, V3(0.85f, 0.9f, 0.6f));
+      } else {
+        float cosLimit = (style == AttackStyle::Melee2H) ? 0.1f : 0.35f;
+        float dmg = p.attackDamage * (p.combo >= 2 ? 1.5f : 1.f);
+        meleeArc(p.pos + V3(0, 1.0f, 0), fwd, p.attackReach, cosLimit, dmg, p.combo >= 2);
+        p.vel += fwd * (style == AttackStyle::Melee2H ? 2.0f : 3.0f);   // lunge
+      }
     }
     if (prog >= 1.f) p.state = ActorState::Idle;
   }
@@ -548,38 +568,50 @@ void Game::updatePlayer(float dt) {
   p.blocking = in.mouseHeld(1) && p.state != ActorState::Attack && p.state != ActorState::Dodge && p.stamina > 4.f;
   if (p.blocking) {
     p.state = ActorState::Block;
-    p.stamina -= 6.f * dt;
+    p.stamina -= (p.cls ? p.cls->blockDrain : 6.f) * dt;
   } else if (p.state == ActorState::Block) {
     p.state = ActorState::Idle;
   }
 
+  // per-class combo clips + swing speed (weapon.speed scales the whole style)
+  AttackStyle atkStyle = p.cls ? p.cls->style : AttackStyle::Melee1H;
+  const char* comboClips[3];
+  float atkBase = 1.05f;
+  switch (atkStyle) {
+    case AttackStyle::Melee2H:
+      comboClips[0] = "Melee_2H_Attack_Chop"; comboClips[1] = "Melee_2H_Attack_Slice"; comboClips[2] = "Melee_2H_Attack_Stab";
+      atkBase = 1.0f; break;
+    case AttackStyle::Staff:
+      comboClips[0] = "Melee_2H_Attack_Stab"; comboClips[1] = "Melee_2H_Attack_Slice"; comboClips[2] = "Melee_2H_Attack_Chop";
+      atkBase = 1.0f; break;
+    case AttackStyle::Bow:
+      comboClips[0] = comboClips[1] = comboClips[2] = "Ranged_Bow_Release";
+      atkBase = 1.3f; break;
+    default:
+      comboClips[0] = "Melee_1H_Attack_Slice_Diagonal"; comboClips[1] = "Melee_1H_Attack_Slice_Horizontal"; comboClips[2] = "Melee_1H_Attack_Stab";
+      atkBase = 1.05f; break;
+  }
+  float atkSpeed = atkBase * (p.cls ? p.cls->weapon.speed : 1.f);
+
   if (!dlg && !paused) {
     if (in.mouseHit(0) && (p.state == ActorState::Idle || p.state == ActorState::Move || (p.state == ActorState::Attack && p.comboWindow > 0))) {
-      if (p.state == ActorState::Attack && p.comboWindow > 0) {
-        p.combo = (p.combo + 1) % 3;
-        p.attackT = 0;
-        p.hitApplied = false;
-        const char* clips[3] = {"Melee_1H_Attack_Slice_Diagonal", "Melee_1H_Attack_Slice_Horizontal", "Melee_1H_Attack_Stab"};
-        const Clip* c = assets.clipAny({clips[p.combo], "Melee_1H_Attack_Chop", "Melee_Unarmed_Attack_Punch_A"});
-        if (c) {
-          p.anim.play(c, 0.08f, false, 1.25f);
-          p.attackDur = c->dur / 1.25f;
-        }
+      bool continuing = (p.state == ActorState::Attack && p.comboWindow > 0);
+      p.combo = continuing ? (p.combo + 1) % 3 : 0;
+      p.attackT = 0;
+      p.hitApplied = false;
+      p.state = ActorState::Attack;
+      const Clip* c = assets.clipAny({comboClips[p.combo], "Melee_1H_Attack_Chop", "Melee_Unarmed_Attack_Punch_A"});
+      if (c) {
+        p.anim.play(c, 0.08f, false, atkSpeed);
+        p.attackDur = c->dur / atkSpeed;
       } else {
-        p.combo = 0;
-        p.attackT = 0;
-        p.hitApplied = false;
-        p.state = ActorState::Attack;
-        const Clip* c = assets.clipAny({"Melee_1H_Attack_Slice_Diagonal", "Melee_1H_Attack_Chop", "Melee_Unarmed_Attack_Punch_A"});
-        if (c) {
-          p.anim.play(c, 0.08f, false, 1.25f);
-          p.attackDur = c->dur / 1.25f;
-        } else {
-          p.attackDur = 0.45f;
-        }
+        p.attackDur = 0.45f;
       }
       p.comboWindow = p.attackDur * 0.55f;
     }
+    // ---- class ability (Q) and elixir (E) ----
+    if (in.hit(KEY_Q)) useAbility();
+    if (in.hit(KEY_E)) useElixir();
     if (in.hit(KEY_SPACE) && length(move) < 0.2f && p.grounded && p.stamina > 12.f) {
       p.state = ActorState::Dodge;
       p.dodgeT = 0;
@@ -598,7 +630,7 @@ void Game::updatePlayer(float dt) {
   }
 
   // ---- locomotion ----
-  float speed = 5.6f;
+  float speed = p.cls ? p.cls->moveSpeed : 5.6f;
   bool moving = length(move) > 0.05f;
   if (p.state == ActorState::Attack) speed *= 0.15f;
   else if (p.blocking) speed *= 0.42f;
@@ -693,7 +725,7 @@ void Game::damagePlayer(float dmg, const V3& fromDir) {
     // frontal block only
     V3 fwd(std::sin(p.facing), 0, std::cos(p.facing));
     if (dot(fwd, normalize(fromDir)) > 0.1f) {
-      p.stamina = std::max(0.f, p.stamina - dmg * 1.6f);
+      p.stamina = std::max(0.f, p.stamina - dmg * (p.cls ? p.cls->blockAbsorb : 1.6f));
       return;
     }
   }
@@ -708,6 +740,7 @@ void Game::spawnEnemy(const char* cfgName, float x, float z) {
   const EnemyCfg* cfg = enemyCfg(cfgName);
   Enemy e;
   e.cfg = cfg;
+  e.uid = nextEnemyUid++;
   e.model = assets.tryLoad(cfg->modelPath);
   if (!e.model) return;
   e.anim.bind(e.model);
@@ -854,11 +887,201 @@ void Game::updateProjectiles(float dt) {
       damagePlayer(p.damage, p.vel * -1.f);
       p.dead = true;
     }
+    if (p.fromPlayer) {
+      for (auto& e : enemies) {
+        if (e.dead) continue;
+        if (distXZ(p.pos, e.pos) > e.radius + 0.5f) continue;
+        if (std::fabs(p.pos.y - (e.pos.y + 1.f)) > 2.0f) continue;
+        bool already = false;
+        for (int u : p.hitUids) if (u == e.uid) { already = true; break; }
+        if (already) continue;
+        e.hp -= p.damage;
+        e.flashTint = 0.18f;
+        e.hurtT = 0.28f;
+        e.aggroed = true;
+        if (e.hp <= 0) { e.hp = 0; e.dead = true; e.deathT = 0; }
+        hitstop = std::max(hitstop, 0.04f);
+        shakeAmt = std::max(shakeAmt, 0.25f);
+        p.hitUids.push_back(e.uid);
+        if (!p.pierce) { p.dead = true; break; }
+      }
+    }
     if (p.pos.y < world.groundY(p.pos.x, p.pos.z) - 0.2f) p.dead = true;
   }
   projectiles.erase(std::remove_if(projectiles.begin(), projectiles.end(),
                                    [](const Projectile& p) { return p.dead; }),
                     projectiles.end());
+}
+
+// ============================================================ classes
+void Game::applyClass(int index) {
+  if (index < 0 || index >= kClassCount) index = 0;
+  const ClassDef& c = kClasses[index];
+  Player& p = player;
+  p.cls = &c;
+  p.classIndex = index;
+  Model* m = assets.tryLoad(c.modelPath);
+  if (!m || m->meshes.empty()) m = assets.tryLoad("characters/Rogue.glb");
+  p.model = m;
+  p.anim.bind(m);
+  p.maxHp = p.hp = c.maxHp;
+  p.maxStamina = p.stamina = c.maxStamina;
+  p.attackDamage = c.weapon.damage * c.damageMult;
+  p.attackReach = c.weapon.reach;
+  p.moveSpeed = c.moveSpeed;
+  p.elixirs = 3;
+  p.abilityCd = p.abilityT = p.elixirCd = 0;
+  equipWeapon(c.weapon);
+  if (c.shieldProp) {
+    p.shieldModel = assets.prop(c.shieldProp);
+    p.shieldName = c.shieldName;
+  } else {
+    p.shieldModel = nullptr;
+    p.shieldName = "";
+  }
+  if (p.anim.model) p.anim.play(assets.clipAny({"Idle_A", "Skeletons_Idle"}), 0.1f, true);
+}
+
+void Game::openClassSelect() {
+  titleScreen = false;
+  classSelect = true;
+  classCursor = player.classIndex;
+  applyClass(classCursor);
+  camDist = 6.5f;
+  camPitch = 0.2f;
+}
+
+void Game::confirmClass() {
+  classSelect = false;
+  beginPlay();   // beginPlay re-applies player.classIndex (set by the picker)
+}
+
+void Game::updateClassSelect() {
+  int prev = classCursor;
+  if (in.hit(KEY_LEFT) || in.hit(KEY_A)) classCursor = (classCursor + kClassCount - 1) % kClassCount;
+  if (in.hit(KEY_RIGHT) || in.hit(KEY_D)) classCursor = (classCursor + 1) % kClassCount;
+  if (in.hit(KEY_1)) classCursor = 0;
+  if (in.hit(KEY_2)) classCursor = 1;
+  if (in.hit(KEY_3)) classCursor = 2;
+  if (in.hit(KEY_4)) classCursor = 3;
+  if (in.hit(KEY_5)) classCursor = 4;
+  if (classCursor != prev) applyClass(classCursor);   // live 3D preview
+  if (in.hit(KEY_ENTER) || in.hit(KEY_SPACE) || in.mouseHit(0)) {
+    in.mousePressed[0] = false;
+    in.padMousePressed[0] = false;
+    confirmClass();
+    return;
+  }
+  if (in.hit(KEY_ESC) || in.hit(KEY_F)) { classSelect = false; startTitle(); }
+}
+
+void Game::fireProjectile(const V3& dir, float speed, float damage, bool pierce, const V3& color) {
+  Projectile pr;
+  pr.pos = player.pos + V3(0, 1.25f, 0) + dir * 0.7f;
+  pr.vel = dir * speed;
+  pr.damage = damage;
+  pr.fromPlayer = true;
+  pr.pierce = pierce;
+  pr.color = color;
+  pr.life = 3.f;
+  projectiles.push_back(pr);
+}
+
+void Game::useAbility() {
+  Player& p = player;
+  if (!p.cls || p.dead || dialogue.active || paused) return;
+  const ClassDef& c = *p.cls;
+  if (p.abilityCd > 0 || p.stamina < c.abilityCost) return;
+  if (p.state == ActorState::Dodge) return;
+  p.stamina -= c.abilityCost;
+  p.abilityCd = c.abilityCooldown;
+  V3 fwd(std::sin(p.facing), 0, std::cos(p.facing));
+  V3 origin = p.pos + V3(0, 1.0f, 0);
+  auto aimDir = [&]() {
+    V3 dir = fwd;
+    if (p.lockOn && p.lockTarget && !p.lockTarget->dead) {
+      V3 to = (p.lockTarget->pos + V3(0, 1, 0)) - origin;
+      if (length(to) > 0.1f) dir = normalize(to);
+    }
+    return dir;
+  };
+  auto beginAbilityAnim = [&](std::initializer_list<const char*> clips, float speed, float dur) {
+    const Clip* cl = assets.clipAny(clips);
+    if (cl) { p.anim.play(cl, 0.05f, false, speed); p.attackDur = cl->dur / speed; }
+    else p.attackDur = dur;
+    p.state = ActorState::Attack;
+    p.attackT = 0;
+    p.hitApplied = true;   // the ability already applied its own hit
+    p.abilityT = dur;
+  };
+  switch (c.ability) {
+    case AbilityKind::Riposte:
+      p.invuln = std::max(p.invuln, 0.4f);
+      p.vel += fwd * 11.f;
+      meleeArc(origin, fwd, p.attackReach + 1.2f, 0.4f, p.attackDamage * 2.2f, true);
+      beginAbilityAnim({"Melee_1H_Attack_Stab", "Melee_1H_Attack_Chop"}, 1.6f, 0.4f);
+      addToasts("RIPOSTE", 1.2f);
+      break;
+    case AbilityKind::ShieldBash:
+      meleeArc(origin, fwd, 3.2f, 0.0f, p.attackDamage * 1.3f, false);
+      for (auto& e : enemies) {
+        if (e.dead) continue;
+        V3 to = e.pos - p.pos; to.y = 0;
+        float d = length(to);
+        if (d < 3.4f && d > 0.01f) {
+          V3 n = to / d;
+          e.pos += n * 1.6f;
+          e.eVelX = n.x * 6.f; e.eVelZ = n.z * 6.f;
+          e.hurtT = std::max(e.hurtT, 0.8f);
+          resolveStatic(e.pos, e.radius);
+        }
+      }
+      beginAbilityAnim({"Melee_Block_Attack", "Melee_1H_Attack_Chop"}, 1.4f, 0.45f);
+      shakeAmt = std::max(shakeAmt, 0.5f);
+      addToasts("SHIELD BASH", 1.2f);
+      break;
+    case AbilityKind::Emberbolt:
+      fireProjectile(aimDir(), 18.f, 30.f, false, V3(1.f, 0.5f, 0.15f));
+      beginAbilityAnim({"Ranged_Magic_Shoot", "Ranged_Magic_Spellcasting"}, 1.4f, 0.35f);
+      break;
+    case AbilityKind::PiercingShot:
+      fireProjectile(aimDir(), 30.f, 30.f, true, V3(0.6f, 0.95f, 1.f));
+      beginAbilityAnim({"Ranged_Bow_Release", "Ranged_2H_Shoot"}, 1.4f, 0.35f);
+      addToasts("PIERCING SHOT", 1.2f);
+      break;
+    case AbilityKind::Whirlwind:
+      meleeArc(origin, fwd, 3.4f, -1.f, p.attackDamage * 1.8f, true);   // cosLimit -1 = full circle
+      for (auto& e : enemies) {
+        if (e.dead) continue;
+        V3 to = e.pos - p.pos; to.y = 0;
+        float d = length(to);
+        if (d < 3.4f && d > 0.01f) {
+          V3 n = to / d;
+          e.pos += n * 1.2f;
+          e.hurtT = std::max(e.hurtT, 0.5f);
+          resolveStatic(e.pos, e.radius);
+        }
+      }
+      beginAbilityAnim({"Melee_2H_Attack_Spin", "Melee_2H_Attack_Spinning"}, 1.5f, 0.6f);
+      shakeAmt = std::max(shakeAmt, 0.6f);
+      addToasts("WHIRLWIND", 1.2f);
+      break;
+  }
+}
+
+void Game::useElixir() {
+  Player& p = player;
+  if (p.dead || dialogue.active || paused) return;
+  if (p.elixirs <= 0 || p.elixirCd > 0 || p.hp >= p.maxHp) return;
+  p.elixirs--;
+  p.elixirCd = 1.f;
+  float heal = 45.f;
+  p.hp = std::min(p.maxHp, p.hp + heal);
+  const Clip* cl = assets.clipAny({"Use_Item", "Interact"});
+  if (cl) p.anim.play(cl, 0.08f, false, 1.3f);
+  char buf[64];
+  std::snprintf(buf, sizeof(buf), "ELIXIR  +%d VITALITY", (int)heal);
+  addToasts(buf, 1.6f);
 }
 
 // ============================================================ drawing
@@ -1094,14 +1317,22 @@ void Game::drawScene() {
 
   drawExtra3D();
 
-  // ---- projectiles ----
-  for (auto& pr : projectiles) {
-    // a tiny glowing marker drawn as an overlay dot in screen space
-    (void)pr;
-  }
-
   R.rasterize();
   R.endFrame();
+
+  // ---- projectiles: glowing screen-space tracers (overlay, no depth) ----
+  for (auto& pr : projectiles) {
+    V4 clip = (R.cam.proj * R.cam.view).mulVec4(V4(pr.pos, 1.f));
+    if (clip.w <= 0.05f) continue;
+    float nx = clip.x / clip.w, ny = clip.y / clip.w;
+    if (nx < -1.1f || nx > 1.1f || ny < -1.1f || ny > 1.1f) continue;
+    int px = (int)((nx * 0.5f + 0.5f) * R.W);
+    int py = (int)((0.5f - ny * 0.5f) * R.H);
+    int r = std::max(2, (int)(R.H / 180.f));
+    R.circle(px, py, r + 2, rgbaf(pr.color.x * 0.5f, pr.color.y * 0.5f, pr.color.z * 0.5f, 0.5f));
+    R.circle(px, py, r, rgbaf(pr.color.x, pr.color.y, pr.color.z));
+    R.circle(px, py, std::max(1, r / 2), rgba32(255, 255, 240));
+  }
 }
 
 // ============================================================ HUD
@@ -1119,11 +1350,16 @@ void Game::drawHud() {
     R.rect(0, 0, R.W, R.H, rgba32(6, 10, 18, 165));
     R.textCenter(R.W / 2, S(110), toUpper(title()).c_str(), rgba32(246, 240, 224), S(3));
     R.textCenter(R.W / 2, S(150), subtitle(), rgba32(232, 195, 122), S(1));
-    R.textCenter(R.W / 2, S(196), "PRESS ENTER TO BEGIN", rgba32(220, 230, 240), S(1));
+    R.textCenter(R.W / 2, S(196), "PRESS ENTER TO CHOOSE YOUR PATH", rgba32(220, 230, 240), S(1));
     R.textCenter(R.W / 2, S(226), "WASD MOVE   MOUSE LOOK   LMB ATTACK   RMB BLOCK", rgba32(190, 200, 215), S(1));
-    R.textCenter(R.W / 2, S(240), "SPACE DODGE/JUMP   F INTERACT   TAB LOCK ON   ESC PAUSE", rgba32(190, 200, 215), S(1));
-    R.textCenter(R.W / 2, S(258), "GAMEPAD   A DODGE   X ATTACK   B INTERACT   START PAUSE", rgba32(150, 165, 185), S(1));
+    R.textCenter(R.W / 2, S(240), "SPACE DODGE/JUMP   Q ABILITY   E ELIXIR   F INTERACT", rgba32(190, 200, 215), S(1));
+    R.textCenter(R.W / 2, S(258), "TAB LOCK ON   ESC PAUSE   GAMEPAD SUPPORTED", rgba32(150, 165, 185), S(1));
     R.textCenter(R.W / 2, R.H - S(18), "KAYKIT ART BY KAY LOUSBERG (CC0)", rgba32(150, 160, 175), S(1));
+    return;
+  }
+
+  if (classSelect) {
+    drawClassSelect();
     return;
   }
 
@@ -1172,10 +1408,17 @@ void Game::drawHud() {
   {
     int gx = R.W - S(150), gy = R.H - S(50);
     R.rect(gx - S(6), gy - S(6), S(148), S(42), rgba32(12, 18, 26, 150));
+    if (player.cls) {
+      V3 ac = player.cls->uiColor;
+      R.text(gx, gy - S(18), toUpper(player.cls->name).c_str(),
+             rgbaf(ac.x, ac.y, ac.z), S(1));
+    }
     R.circle(gx, gy + S(4), S(3), rgba32(232, 195, 122));
     R.text(gx + S(10), gy, player.weaponName, rgba32(235, 230, 215), S(1));
-    R.circle(gx, gy + S(18), S(3), rgba32(143, 224, 255));
-    R.text(gx + S(10), gy + S(14), player.shieldName, rgba32(235, 230, 215), S(1));
+    if (player.shieldModel) {
+      R.circle(gx, gy + S(18), S(3), rgba32(143, 224, 255));
+      R.text(gx + S(10), gy + S(14), player.shieldName, rgba32(235, 230, 215), S(1));
+    }
   }
 
   // FPS
@@ -1243,8 +1486,10 @@ void Game::drawHud() {
   }
 
   if (!locked) {
-    R.textCenter(R.W / 2, R.H - S(30), "CLICK TO CAPTURE MOUSE", rgba32(200, 210, 225, 180), S(1));
+    R.textCenter(R.W / 2, R.H - S(46), "CLICK TO CAPTURE MOUSE", rgba32(200, 210, 225, 180), S(1));
   }
+
+  drawClassHud();
 
   if (paused) {
     R.rect(0, 0, R.W, R.H, rgba32(6, 10, 16, 190));
@@ -1259,4 +1504,103 @@ void Game::drawHud() {
   }
 
   drawHudExtra();
+}
+
+// ---- class HUD: ability cooldown + elixir pips (bottom centre) ----
+void Game::drawClassHud() {
+  if (!player.cls) return;
+  float ui = (float)R.H / 360.f;
+  auto S = [&](float v) { return (int)(v * ui); };
+  const ClassDef& c = *player.cls;
+  int cx = R.W / 2, y = R.H - S(26);
+  int aw = S(128);
+
+  // ability slot (Q)
+  int ax = cx - aw - S(6);
+  R.rect(ax, y, aw, S(18), rgba32(12, 18, 26, 190));
+  R.rectOutline(ax, y, aw, S(18), rgba32(232, 195, 122, 90));
+  float cdF = c.abilityCooldown > 0 ? clampf(player.abilityCd / c.abilityCooldown, 0, 1) : 0;
+  if (cdF > 0) R.rect(ax + 1, y + 1, (int)((aw - 2) * cdF), S(18) - 2, rgba32(45, 55, 68, 200));
+  R.text(ax + S(5), y + S(5), "Q", rgba32(232, 195, 122), S(1));
+  R.text(ax + S(16), y + S(5), c.abilityName,
+         cdF > 0 ? rgba32(150, 160, 175) : rgba32(242, 236, 220), S(1));
+
+  // elixir slot (E)
+  int ex = cx + S(6);
+  R.rect(ex, y, aw, S(18), rgba32(12, 18, 26, 190));
+  R.rectOutline(ex, y, aw, S(18), rgba32(143, 224, 255, 70));
+  R.text(ex + S(5), y + S(5), "E", rgba32(143, 224, 255), S(1));
+  R.text(ex + S(16), y + S(5), "ELIXIR", rgba32(242, 236, 220), S(1));
+  for (int i = 0; i < 3; i++) {
+    uint32_t col = i < player.elixirs ? rgba32(120, 220, 140) : rgba32(50, 60, 70);
+    R.circle(ex + S(84) + i * S(13), y + S(9), S(3), col);
+  }
+}
+
+// ---- class picker overlay ----
+void Game::drawClassSelect() {
+  float ui = (float)R.H / 360.f;
+  auto S = [&](float v) { return (int)(v * ui); };
+  R.rect(0, 0, R.W, R.H, rgba32(6, 10, 18, 205));
+
+  R.textCenter(R.W / 2, S(20), "CHOOSE YOUR PATH", rgba32(246, 240, 224), S(2));
+  R.textCenter(R.W / 2, S(44), "Five roads leave Vaeloria Green. Pick the one that fits your hand.",
+               rgba32(190, 200, 215), S(1));
+
+  // stat normalisation ceilings
+  const float maxHp = 170.f, maxSta = 130.f, maxSpd = 6.1f, maxPwr = 1.45f;
+  int margin = S(20), gap = S(8);
+  int cardW = (R.W - 2 * margin - (kClassCount - 1) * gap) / kClassCount;
+  int cardY = S(66), cardH = S(150);
+
+  auto bar = [&](int x, int y, int w, const char* label, float frac, uint32_t col) {
+    R.text(x, y, label, rgba32(170, 180, 195), S(1));
+    int bx = x + S(26), bw = w - S(26), bh = S(5);
+    R.rect(bx, y + S(1), bw, bh, rgba32(30, 38, 48));
+    R.rect(bx, y + S(1), (int)(bw * clampf(frac, 0, 1)), bh, col);
+  };
+
+  for (int i = 0; i < kClassCount; i++) {
+    const ClassDef& c = kClasses[i];
+    int x = margin + i * (cardW + gap);
+    bool sel = (i == classCursor);
+    V3 ac = c.uiColor;
+    uint32_t accent = rgbaf(ac.x, ac.y, ac.z);
+    R.rect(x, cardY, cardW, cardH, sel ? rgba32(20, 28, 40, 235) : rgba32(12, 18, 26, 210));
+    R.rectOutline(x, cardY, cardW, cardH, sel ? accent : rgba32(70, 80, 95, 160));
+    if (sel) R.rect(x, cardY, cardW, S(2), accent);
+
+    // number key hint
+    char num[2] = {(char)('1' + i), 0};
+    R.text(x + cardW - S(10), cardY + S(5), num, sel ? accent : rgba32(120, 130, 145), S(1));
+    // name
+    R.text(x + S(7), cardY + S(6), c.name, sel ? accent : rgba32(225, 228, 235), S(1));
+
+    int by = cardY + S(26);
+    int bw = cardW - S(14);
+    bar(x + S(7), by, bw, "VIT", c.maxHp / maxHp, rgba32(179, 58, 46)); by += S(13);
+    bar(x + S(7), by, bw, "STA", c.maxStamina / maxSta, rgba32(120, 170, 90)); by += S(13);
+    bar(x + S(7), by, bw, "SPD", c.moveSpeed / maxSpd, rgba32(143, 224, 255)); by += S(13);
+    bar(x + S(7), by, bw, "PWR", c.damageMult / maxPwr, rgba32(232, 195, 122)); by += S(18);
+
+    // ability name
+    R.text(x + S(7), by, "Q", rgba32(232, 195, 122), S(1));
+    R.text(x + S(16), by, c.abilityName, rgba32(225, 228, 235), S(1));
+  }
+
+  // selected class detail strip
+  const ClassDef& sc = kClasses[classCursor];
+  int dy = cardY + cardH + S(14);
+  V3 ac = sc.uiColor;
+  R.textCenter(R.W / 2, dy, sc.tagline, rgbaf(ac.x, ac.y, ac.z), S(1));
+  char line[256];
+  std::snprintf(line, sizeof(line), "WEAPON: %s%s%s", sc.weapon.name,
+                sc.shieldProp ? "  +  " : "", sc.shieldProp ? sc.shieldName : "");
+  R.textCenter(R.W / 2, dy + S(14), line, rgba32(225, 228, 235), S(1));
+  std::snprintf(line, sizeof(line), "%s - %s", sc.abilityName, sc.abilityDesc);
+  R.textCenter(R.W / 2, dy + S(28), line, rgba32(190, 200, 215), S(1));
+
+  R.textCenter(R.W / 2, R.H - S(16),
+               "LEFT/RIGHT OR 1-5 SELECT    ENTER BEGIN    ESC BACK",
+               rgba32(200, 210, 225), S(1));
 }

@@ -50,18 +50,27 @@ Windows x64 portable build  (native C++ port)
 ====================================================================
  WASD ......... move                LMB ......... attack (combo)
  SHIFT ........ sprint              RMB ......... block
- SPACE ........ dodge roll          Q ........... emberbolt
+ SPACE ........ dodge roll          Q ........... class ability
  E ............ drink elixir        F ........... interact
  TAB / MMB .... lock on             ESC ......... pause
  MOUSE / arrows camera
  Left stick / right stick / A / B / X / Y / LB / RB / Start also work.
+
+ After the title screen, choose one of five classes:
+   1 Duelist    rapier + buckler, balanced   Q: Riposte
+   2 Warden     sword + shield, tanky        Q: Shield Bash
+   3 Ember Mage staff, fragile, fast mana    Q: Emberbolt
+   4 Ranger     bow, fastest, ranged         Q: Piercing Shot
+   5 Berserker  greataxe, heavy hitter       Q: Whirlwind
+ Arrow keys / A-D / 1-5 to pick, Enter to begin. Every class has 3 elixirs (E).
 
 ====================================================================
  COMMAND LINE (optional)
 ====================================================================
    --width 1920 --height 1080     window size
    --render-width 1280 --render-height 720   internal resolution
-   --play                         skip the title screen
+   --play                         skip the title + class picker
+   --class duelist|warden|mage|ranger|berserker   pick a class
    --game spire
    --help                         list every option
 

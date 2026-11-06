@@ -95,13 +95,29 @@ The manifest declares `asInvoker`, so it never asks for administrator rights.
 |---|---|
 | **WASD** move | **Shift** sprint |
 | **LMB** attack (combo) | **RMB** block |
-| **Space** dodge / jump | **Q** bolt |
+| **Space** dodge / jump | **Q** class ability |
 | **E** elixir | **F** interact |
 | **Tab / MMB** lock on | **Esc** pause |
 | **Mouse** camera | |
 
 Xbox-compatible controllers work alongside the keyboard: left stick move, right
-stick camera, A dodge, X attack, B interact, Start pause.
+stick camera, A dodge, X attack, B interact, Y ability, LB elixir, Start pause.
+
+## Playable classes (native build)
+
+After the title screen the native port opens a class picker — choose with the
+arrow keys / `1`-`5` and confirm with Enter (or `--play --class <id>`):
+
+| Class | Weapon | Vitality | Signature ability (Q) |
+|---|---|---|---|
+| **Duelist** | rapier + buckler | 120 | Riposte — lunging counter-thrust |
+| **Warden** | longsword + shield | 170 | Shield Bash — staggering knockback |
+| **Ember Mage** | staff | 85 | Emberbolt — ranged fire bolt |
+| **Ranger** | longbow | 100 | Piercing Shot — passes through foes |
+| **Berserker** | greataxe | 150 | Whirlwind — spinning area cleave |
+
+Each class has its own model, stats, attack style and ability; all carry three
+elixirs on `E`. See `native/README.md` for the full breakdown.
 
 ## How the native renderer works
 
@@ -113,7 +129,8 @@ base.h        math, JSON, inflate (RFC 1950/1951), PNG decode, mip chain
 gltf.*        glTF 2.0 / GLB loader: meshes, materials, embedded textures, skins, clips
 render.*      multithreaded rasterizer, bilinear + trilinear sampling, frustum culling, HUD
 platform.*    one file, three back ends: X11, Win32/XInput, headless
-game.*        movement, OoT-style combat, lock-on, enemies, dialogue
+game.*        movement, OoT-style combat, lock-on, enemies, dialogue, HUD
+classes.*     the five playable classes: stats, weapons, abilities
 worlds.cpp    the campaign, assembled from the KayKit packs
 vfs.*         asset lookup for the embedded single-file build
 ```

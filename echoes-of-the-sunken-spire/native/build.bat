@@ -20,7 +20,7 @@ if errorlevel 1 goto fail
 cl /nologo /std:c++17 /O2 /EHsc /W3 /D_CRT_SECURE_NO_WARNINGS ^
    /Fo:build\ /Fe:spire.exe ^
    src\gltf.cpp src\render.cpp src\platform.cpp ^
-   src\game.cpp src\worlds.cpp src\main.cpp ^
+   src\game.cpp src\classes.cpp src\worlds.cpp src\main.cpp ^
    build\app.res ^
    /link user32.lib gdi32.lib xinput.lib ^
    /SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup

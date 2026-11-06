@@ -2,6 +2,7 @@
 //  main.cpp — entry point, argument parsing, the frame loop
 // ---------------------------------------------------------------------------
 #include "game.h"
+#include "classes.h"
 #include <cstdio>
 #include <cstdlib>
 #include <chrono>
@@ -88,6 +89,8 @@ int main(int argc, char** argv) {
   bool autoPlay = false;
   bool smoke = false;
   bool showTitle = false;
+  bool showSelect = false;
+  std::string classArg;
   int shotsEvery = 0;
   float warpX = 1e9f, warpZ = 1e9f;
 
@@ -107,6 +110,8 @@ int main(int argc, char** argv) {
     else if (a == "--play") autoPlay = true;
     else if (a == "--smoke") { smoke = true; autoPlay = true; }
     else if (a == "--title") showTitle = true;
+    else if (a == "--select") showSelect = true;
+    else if (a == "--class") classArg = next("duelist");
     else if (a == "--warp") { warpX = (float)std::atof(next("0").c_str()); warpZ = (float)std::atof(next("0").c_str()); }
     else if (a == "--help" || a == "-h") {
       std::printf(
@@ -118,9 +123,11 @@ int main(int argc, char** argv) {
           "  --shots-every N       write shot0001.bmp, shot0002.bmp ... every N frames\n"
           "  --width/--height      window size (default 1280x720)\n"
           "  --render-width/-height internal render resolution (default: the window size)\n"
-          "  --play                skip the title screen\n"
+          "  --play                skip the title + class picker and start playing\n"
           "  --title               keep the title screen (screenshots)\n"
-          "  --smoke               scripted self-test: walk, jump, attack, lock on (prints state)\n"
+          "  --select              open the class picker (screenshots)\n"
+          "  --class <id>          choose a class: duelist, warden, mage, ranger, berserker\n"
+          "  --smoke               scripted self-test: walk, jump, attack, ability, elixir (prints state)\n"
           "  --warp X Z            drop the player at world X,Z (debug)\n",
           argv[0]);
       return 0;
@@ -166,6 +173,16 @@ int main(int argc, char** argv) {
 
   Game* game = createSunkenSpire();
   game->init(dataRoot, renW, renH, headless);
+
+  // resolve --class (id, name, or friendly alias) before the world is built
+  if (!classArg.empty()) {
+    int ci = classIndexById(classArg.c_str());
+    if (ci < 0) {
+      std::fprintf(stderr, "[kaykit-native] unknown class '%s' - using duelist\n", classArg.c_str());
+      ci = 0;
+    }
+    game->player.classIndex = ci;
+  }
 
   plat::Config cfg;
   cfg.title = game->title();
@@ -214,7 +231,9 @@ int main(int argc, char** argv) {
     std::printf("[models] props without meshes: %d / %d\n", nPropsNoMesh, (int)game->world.props.size());
   }
 
-  if (!showTitle && (autoPlay || headless)) {
+  if (showSelect) {
+    game->openClassSelect();
+  } else if (!showTitle && (autoPlay || headless)) {
     game->beginPlay();
     if (!headless) plat::setMouseCapture(true);
   }
@@ -273,7 +292,7 @@ int main(int argc, char** argv) {
 
     // ---- input edges ----
     game->locked = plat::mouseCaptured();
-    if (!game->titleScreen && !game->paused && !game->locked && in.mouseHit(0)) {
+    if (!game->titleScreen && !game->classSelect && !game->paused && !game->locked && in.mouseHit(0)) {
       // first click grabs the pointer, it should not also swing the sword
       plat::setMouseCapture(true);
       game->in.mousePressed[0] = false;
@@ -284,9 +303,11 @@ int main(int argc, char** argv) {
       if (in.hit(KEY_ENTER) || in.hit(KEY_SPACE) || in.mouseHit(0)) {
         game->in.mousePressed[0] = false;
         game->in.padMousePressed[0] = false;
-        game->beginPlay();
+        game->openClassSelect();
       }
       if (in.hit(KEY_ESC)) break;
+    } else if (game->classSelect) {
+      game->updateClassSelect();
     } else {
       if (in.hit(KEY_ESC)) {
         if (game->paused) {
@@ -312,17 +333,24 @@ int main(int argc, char** argv) {
         wdt = dt * 0.15f;
       }
       game->time += dt;
-      if (!game->titleScreen) {
+      if (!game->titleScreen && !game->classSelect) {
         game->updatePlayer(wdt);
         game->updateEnemies(wdt);
         game->updateProjectiles(wdt);
         game->resolveBodies();
         game->onUpdate(wdt);
+      } else if (game->classSelect) {
+        // slow orbit around the previewed character
+        game->camYaw += dt * 0.35f;
+        game->camDist = 6.5f;
+        game->camPitch = 0.2f;
+        game->player.anim.update(dt);
       } else {
         // idle orbit behind the title
         game->camYaw += dt * 0.12f;
         game->camDist = 12.f;
         game->camPitch = 0.28f;
+        game->player.anim.update(dt);
       }
       // toasts
       for (auto& t : game->toasts) t.life -= dt;
